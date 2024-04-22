@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using App.Models;
+using App.Transport;
 
 namespace App;
 
@@ -35,14 +36,14 @@ public static class ServerLogger
         return $"{messageType} {contentString}";
     }
 
-    public static void LogReceived(IBaseModel model, IPAddress address, ushort port)
+    public static void LogReceived(IBaseModel model, IPEndPoint from)
     {
-        Console.WriteLine($"RECV {address}:{port} | {BuildModelOutput(model)}");
+        Console.WriteLine($"RECV {from.Address}:{from.Port} | {BuildModelOutput(model)}");
     }
 
-    public static void LogSent(IBaseModel model, IPAddress address, ushort port)
+    public static void LogSent(IBaseModel model, IPEndPoint from)
     {
-        Console.WriteLine($"SENT {address}:{port} | {BuildModelOutput(model)}");
+        Console.WriteLine($"SENT {from.Address}:{from.Port} | {BuildModelOutput(model)}");
     }
 
     public static void LogDebug(string msg)

@@ -1,13 +1,20 @@
-﻿using App.Enums;
+﻿using System.Net;
+using App.Enums;
 using App.Models;
 
 namespace App.Transport;
+
+public class MessageEvent
+{
+    public required IBaseModel Model { get; set; }
+    public required IPEndPoint From { get; set; }
+}
 
 public interface ITransport
 {
     public event EventHandler<IBaseModel> OnMessageReceived;
     public event EventHandler OnMessageDelivered;
-    public event EventHandler OnConnected;
+    public event EventHandler<IPEndPoint> OnConnected;
 
     public Task StartPrivateConnection();
     public Task Auth(AuthModel data);

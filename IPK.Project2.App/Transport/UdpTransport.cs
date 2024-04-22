@@ -51,7 +51,7 @@ public class UdpTransport : ITransport
     
     public async Task StartPrivateConnection()
     {
-        _client.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
+        _client.Client.Bind(new IPEndPoint(IPAddress.Any, 4568));
     }
 
     public async Task Auth(AuthModel data)
@@ -101,9 +101,9 @@ public class UdpTransport : ITransport
 
     private async Task Receive()
     {
-        // var ipv4 = await GetIpAddress(_options.IpAddress);
+        var ipv4 = await GetIpAddress(_options.IpAddress);
         //
-        // _ipAddress = ipv4 ?? throw new ServerUnreachableException("Invalid server address");
+        _ipAddress = ipv4 ?? throw new ServerUnreachableException("Invalid server address");
 
         // UDP client is listening on all ports
         // _client.Client.Bind(new IPEndPoint(_ipAddress, 0));
@@ -150,7 +150,9 @@ public class UdpTransport : ITransport
                             _options.Port = (ushort)from.Port;
                         }
 
+                        Console.WriteLine("Sending confirmation");
                         await Send(new UdpConfirmModel { RefMessageId = modelWithId.Id });
+                        Console.WriteLine("Confirmation sent");
                         _processedMessages.Add(modelWithId.Id);
                         OnMessageReceived?.Invoke(this, model);
                         break;

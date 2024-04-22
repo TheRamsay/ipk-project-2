@@ -178,6 +178,7 @@ public class Ipk24ChatProtocol : IProtocol
                 var authenticated = AuthUser(data);
                 if (authenticated)
                 {
+                    Console.WriteLine("AUTH SUCCESFULL");
                     await _transport.StartPrivateConnection();
                     await Reply(new ReplyModel { Status = true, Content = "Welcome to the server"});
                     await AnnounceChannelChange(data.DisplayName, _client?.Channel ?? "general");

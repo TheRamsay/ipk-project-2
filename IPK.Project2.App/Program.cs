@@ -29,17 +29,4 @@ static class Program
         var server = new Server(opt, Log.Logger);
         await server.Run(opt);
     }
-
-    public static async Task RunClient(Client client)
-    {
-        try
-        {
-            await client.Protocol.Start();
-        } catch (Exception e)
-        {
-            await client.Protocol.Disconnect();
-            // Console.WriteLine("MLEM ERRROR");
-        }
-    }
-
 }

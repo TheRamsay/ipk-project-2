@@ -6,6 +6,7 @@ using App.Models;
 using App.Models.udp;
 using App.Transport;
 using CommandLine;
+using Serilog;
 
 namespace App;
 
@@ -19,51 +20,14 @@ static class Program
     }
     public static async Task RunClient(Options opt)
     {
-        // TcpListener server = new TcpListener(IPAddress.Parse(opt.IpAddress), opt.Port);
-        UdpClient server = new UdpClient(4567);
-        Console.WriteLine("MKEJMKKWfew");
-        
-        List<Client> clients = new();
-        
-        var cancellationTokenSource = new CancellationTokenSource();
-        
-        // server.Start();
+        Log.Logger = new LoggerConfiguration()
+            .WriteTo.Console()
+            .WriteTo.File("log-.txt", rollingInterval: RollingInterval.Day)
+            .MinimumLevel.Debug()
+            .CreateLogger();
 
-        var i = 0;
-
-        while (true)
-        {
-            // var socket = await server.AcceptTcpClientAsync();
-            var data = await server.ReceiveAsync();
-            Console.WriteLine("RECeived first message");
-            // Console.WriteLine("new client accepted");
-            // var client = new Client
-            // {
-            //     Protocol = new Ipk24ChatProtocol(new TcpTransport(opt, CancellationToken.None, socket), cancellationTokenSource, clients),
-            //     Username = $"User{clients.Count}", 
-            // };
-            
-            var protocol = new Ipk24ChatProtocol(
-                new UdpTransport(
-                    opt, 
-                    CancellationToken.None, 
-                    server,
-                    new List<byte[]> { data.Buffer }), 
-                cancellationTokenSource, 
-                clients
-            );
-            
-            protocol.OnMessage += async (sender, model) =>
-            {
-                Console.WriteLine($"JOOOO ZPRAVA {model}");
-            };
-            //
-            // clients.Add(client);
-            protocol.Start().ContinueWith(_ => clients.RemoveAll(x => x.Protocol == protocol));
-        }
-        
-        // server.Stop();
-        server.Close();
+        var server = new Server(opt, Log.Logger);
+        await server.Run(opt);
     }
 
     public static async Task RunClient(Client client)
@@ -74,7 +38,7 @@ static class Program
         } catch (Exception e)
         {
             await client.Protocol.Disconnect();
-            Console.WriteLine("MLEM ERRROR");
+            // Console.WriteLine("MLEM ERRROR");
         }
     }
 

@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Sockets;
 using App.Enums;
 using App.Exceptions;
 using App.Models;
@@ -7,9 +8,9 @@ using Serilog;
 
 namespace App;
 
-public class Ipk24ChatProtocol : IProtocol
+public class Ipk24ChatProtocol: IProtocol
 {
-    private readonly ITransport _transport;
+    public readonly ITransport Transport;
     // _messageDeliveredSignal is used for waiting for the message to be delivered (confirmed by the server)
     private readonly SemaphoreSlim _messageDeliveredSignal = new(0, 1);
     // _messageProcessedSignal is used for waiting for the message to be processed (for example, receiving a reply to the AUTH message)
@@ -19,30 +20,32 @@ public class Ipk24ChatProtocol : IProtocol
     // Used for cancelling the message receive loop
     private readonly CancellationTokenSource _cancellationTokenSource;
     private readonly ILogger _logger;
+    private readonly Options _options;
 
     private readonly IList<Client> _clients;
     private Client _client;
 
     private Exception? _exceptionToThrow;
     private ProtocolStateBox? _protocolState;
-    private string _displayName = string.Empty;
 
     public event EventHandler<IBaseModel>? OnMessage;
     public event EventHandler? OnConnected;
 
-    public Ipk24ChatProtocol(ITransport transport, CancellationTokenSource cancellationTokenSource, IList<Client> clients, Client client, ILogger logger)
+    public Ipk24ChatProtocol(ITransport transport, CancellationTokenSource cancellationTokenSource,  IList<Client> clients, Client client, ILogger logger, Options options)
     {
-        _transport = transport;
+        Transport = transport;
         _cancellationTokenSource = cancellationTokenSource;
         _clients = clients;
         _client = client;
         _logger = logger;
+        _options = options;
         
         // Event subscription
-        _transport.OnMessageReceived += OnMessageReceivedHandler;
-        _transport.OnMessageDelivered += OnMessageDeliveredHandler;
-        _transport.OnConnected += OnConnectedHandler;
+        Transport.OnMessageReceived += OnMessageReceivedHandler;
+        Transport.OnMessageDelivered += OnMessageDeliveredHandler;
+        Transport.OnConnected += OnConnectedHandler;
     }
+
 
     public async Task Start()
     {
@@ -59,7 +62,8 @@ public class Ipk24ChatProtocol : IProtocol
             // - Server sends a message that is not expected in the current state
             // The ProtocolEnHandler function is used for throwing exceptions from EventHandlers
             // This is necessary because the exceptions thrown in EventHandlers are not caught by the try-catch block
-            await await Task.WhenAny(_transport.Start(_protocolState), ProtocolEndHandler());
+            await await Task.WhenAny(Transport.Start(_protocolState), ProtocolEndHandler());
+            ServerLogger.LogDebug("Finished transporting");
             // await _transport.Start(_protocolState);
             // Console.WriteLine("Finished!!!!");
         }
@@ -72,16 +76,28 @@ public class Ipk24ChatProtocol : IProtocol
                 DisplayName = "Server"
             };
 
+            ServerLogger.LogDebug("Sending error message");
             await SendInternal(errorModel);
+            ServerLogger.LogDebug("Disconnecting");
             await Disconnect();
+            ServerLogger.LogDebug("Disconnected");
             // Exception is rethrown for proper ending of the protocol in the ChatClient
-            throw;
+            // throw;
         }
-    }
-
-    public void Rename(string displayName)
-    {
-        _displayName = displayName;
+        catch (Exception e) when (e is ClientUnreachableException or SocketException)
+        {
+            ServerLogger.LogInternalError(e.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            ServerLogger.LogDebug("Operation cancelled");
+            await Disconnect();
+        }
+        catch (Exception e)
+        {
+            ServerLogger.LogDebug(e.Message);
+            await Disconnect();
+        }
     }
 
     public async Task Send(IBaseModel model)
@@ -126,15 +142,19 @@ public class Ipk24ChatProtocol : IProtocol
     public async Task Disconnect()
     {
         await SendInternal(new ByeModel());
-        // This will cancel the message receive loop
+        ServerLogger.LogDebug("Sent bye");
+        await Task.Delay(_options.Timeout);
         await _cancellationTokenSource.CancelAsync();
-        _transport.Disconnect();
+        Transport.Disconnect();
+        ServerLogger.LogDebug("Final disconnect");
     }
 
     private async Task WaitForDelivered(Task task)
     {
+        ServerLogger.LogDebug("WaitForDelivered is up");
         var tasks = new[] { _messageDeliveredSignal.WaitAsync(_cancellationTokenSource.Token), task };
         await Task.WhenAll(tasks);
+        ServerLogger.LogDebug("WaitForDelivered is done");
     }
 
     private async Task WaitForDeliveredAndProcessed(Task task)
@@ -157,12 +177,12 @@ public class Ipk24ChatProtocol : IProtocol
     {
         var task = data switch
         {
-            ReplyModel replyModel => _transport.Reply(replyModel),
-            AuthModel authModel => _transport.Auth(authModel),
-            JoinModel joinModel => _transport.Join(joinModel),
-            MessageModel messageModel => _transport.Message(messageModel),
-            ByeModel byeModel => _transport.Bye(),
-            ErrorModel errorModel => _transport.Error(errorModel),
+            ReplyModel replyModel => Transport.Reply(replyModel),
+            AuthModel authModel => Transport.Auth(authModel),
+            JoinModel joinModel => Transport.Join(joinModel),
+            MessageModel messageModel => Transport.Message(messageModel),
+            ByeModel => Transport.Bye(),
+            ErrorModel errorModel => Transport.Error(errorModel),
             _ => throw new InternalException($"Invalid message type {data}")
         };
         
@@ -196,10 +216,9 @@ public class Ipk24ChatProtocol : IProtocol
                 var authenticated = AuthUser(data);
                 if (authenticated)
                 {
-                    // Console.WriteLine("AUTH SUCCESFULL");
-                    await _transport.StartPrivateConnection();
+                    await Transport.StartPrivateConnection();
                     await Reply(new ReplyModel { Status = true, Content = "Welcome to the server"});
-                    await AnnounceChannelChange(data.DisplayName, _client?.Channel ?? "general");
+                    await AnnounceChannelChange(data.DisplayName, _client.Channel);
                     _protocolState.SetState(ProtocolState.Open);
                 }
                 else
@@ -209,29 +228,29 @@ public class Ipk24ChatProtocol : IProtocol
                 }
                 break;
             case (ProtocolState.Open, MessageModel data):
-                // OnMessage?.Invoke(this, data);
-                await Broadcast(data, _client?.Channel ?? "general");
+                _client.DisplayName = data.DisplayName;
+                await Broadcast(data, _client.Channel);
                 break;
             case (ProtocolState.Open, JoinModel data):
                 var joined = JoinUser(data, out var previousChannel);
                 if (joined)
                 {
+                    _client.DisplayName = data.DisplayName;
                     await Reply(new ReplyModel { Status = true, Content = "Welcome to the channel"});
                     await AnnounceChannelChange(data.DisplayName, previousChannel, false);
-                    await AnnounceChannelChange(data.DisplayName, _client?.Channel ?? "general");
+                    await AnnounceChannelChange(data.DisplayName, _client.Channel);
                 }
                 else
                 {
                     await Reply(new ReplyModel { Status = false, Content = "Invalid join attempt"});
                 }
 
-                // OnMessage?.Invoke(this, data);
                 break;
             case (ProtocolState.Open, ErrorModel data):
-                _exceptionToThrow = new ServerException(data);
+                _exceptionToThrow = new ClientException(data);
                 _protocolState.SetState(ProtocolState.End);
                 break;
-            case (ProtocolState.Open or ProtocolState.Auth, ByeModel _):
+            case (_, ByeModel):
                 _protocolState.SetState(ProtocolState.End);
                 break;
             default:
@@ -242,21 +261,13 @@ public class Ipk24ChatProtocol : IProtocol
 
         if (_protocolState.State == ProtocolState.End)
         {
-            await AnnounceChannelChange(_client!.DisplayName, _client?.Channel ?? "general", false);
+            await AnnounceChannelChange(_client!.DisplayName, _client.Channel, false);
             _endSignal.Release();
         }
     }
     
     private bool AuthUser(AuthModel data)
     {
-        if (_clients.Any(c => c.Username == data.Username))
-        {
-            return false;
-        }
-
-        // var newClient = new Client { Protocol = this, DisplayName = data.DisplayName, Username = data.Username };
-        // _clients.Add(newClient);
-        // _client = newClient;
         _client.DisplayName = data.DisplayName;
         _client.Username = data.Username;
         return true;
@@ -264,12 +275,6 @@ public class Ipk24ChatProtocol : IProtocol
     
     private bool JoinUser(JoinModel data, out string previousChannel)
     {
-        if (_client is null)
-        {
-            previousChannel = "general";
-            return false;
-        }
-
         previousChannel = _client.Channel;
         _client.DisplayName = data.DisplayName;
         _client.Channel = data.ChannelId;
@@ -281,15 +286,15 @@ public class Ipk24ChatProtocol : IProtocol
         await Broadcast(new MessageModel
         {
             DisplayName = "Server",
-            Content = $"{displayName} has {(joined ? "joined" : "left")} the channel"
-        }, channel, true);
+            Content = $"{displayName} has {(joined ? "joined" : "left")} {channel}"
+        }, channel, joined);
     }
     
     private async Task Broadcast(MessageModel data, string channel, bool sendSelf = false)
     {
         foreach (var client in _clients)
         {
-            if (!sendSelf && client.Username == _client?.Username || client.Channel != channel)
+            if ((!sendSelf && client.Protocol == _client.Protocol) || client.Channel != channel)
             {
                 continue;
             }
@@ -297,13 +302,14 @@ public class Ipk24ChatProtocol : IProtocol
             await client.Protocol.Message(data);
         }
     }
-
+    
     #region Event handlers
 
     private void OnMessageDeliveredHandler(object? sender, EventArgs args)
     {
         try
         {
+            ServerLogger.LogDebug("Message delivered");
             _messageDeliveredSignal.Release();
         }
         catch (Exception e)

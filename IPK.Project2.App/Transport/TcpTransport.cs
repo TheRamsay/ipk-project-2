@@ -30,10 +30,12 @@ public class TcpTransport : ITransport
 
     public async Task Start(ProtocolStateBox protocolState)
     {
-        // await _client.ConnectAsync(_options.IpAddress, _options.Port, _cancellationToken);
         _stream = _client.GetStream();
         var from = _client.Client.RemoteEndPoint as IPEndPoint;
-        // Console.WriteLine($"From is {from}");
+        if (from is null)
+        {
+            throw new ClientUnreachableException("Could not get remote endpoint");
+        }
         OnConnected?.Invoke(this, from);
 
         while (true)
@@ -43,7 +45,7 @@ public class TcpTransport : ITransport
             // This means the server has closed the connection
             if (receivedData is null)
             {
-                throw new ServerUnreachableException("Server has closed the connection");
+                throw new ClientUnreachableException("Server has closed the connection");
             }
 
             var model = ParseMessage(receivedData);

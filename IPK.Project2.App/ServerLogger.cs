@@ -14,7 +14,7 @@ public static class ServerLogger
 
     private static string BuildModelOutput(IBaseModel model)
     {
-        string messageType = model switch
+        var messageType = model switch
         {
             ErrorModel errorModel => "ERR",
             MessageModel messageModel => "MSG",
@@ -40,14 +40,24 @@ public static class ServerLogger
     {
         Console.WriteLine($"RECV {from.Address}:{from.Port} | {BuildModelOutput(model)}");
     }
+    
+    public static void LogReceived(string msg, IPEndPoint from)
+    {
+        Console.WriteLine($"RECV {from.Address}:{from.Port} | {msg}");
+    }
 
     public static void LogSent(IBaseModel model, IPEndPoint from)
     {
         Console.WriteLine($"SENT {from.Address}:{from.Port} | {BuildModelOutput(model)}");
     }
+    
+    public static void LogSent(string msg, IPEndPoint from)
+    {
+        Console.WriteLine($"SENT {from.Address}:{from.Port} | {msg}");
+    }
 
     public static void LogDebug(string msg)
     {
-        Console.WriteLine($"[DEBUG] {msg}");
+        Console.Error.WriteLine($"[DEBUG] {msg}");
     }
 }

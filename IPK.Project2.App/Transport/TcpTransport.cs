@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using App.Enums;
@@ -18,7 +19,7 @@ public class TcpTransport : ITransport
 
     public event EventHandler<IBaseModel>? OnMessageReceived;
     public event EventHandler? OnMessageDelivered;
-    public event EventHandler? OnConnected;
+    public event EventHandler<IPEndPoint>? OnConnected;
 
     public TcpTransport(Options options, CancellationToken cancellationToken, TcpClient client)
     {
@@ -31,7 +32,9 @@ public class TcpTransport : ITransport
     {
         // await _client.ConnectAsync(_options.IpAddress, _options.Port, _cancellationToken);
         _stream = _client.GetStream();
-        OnConnected?.Invoke(this, EventArgs.Empty);
+        var from = _client.Client.RemoteEndPoint as IPEndPoint;
+        // Console.WriteLine($"From is {from}");
+        OnConnected?.Invoke(this, from);
 
         while (true)
         {
@@ -122,8 +125,8 @@ public class TcpTransport : ITransport
             ["AUTH", _, "AS", _, "USING", _] => new AuthModel
             {
                 Username = parts[1],
-                Secret = parts[3],
-                DisplayName = parts[5]
+                DisplayName = parts[3],
+                Secret = parts[5],
             },
             ["MSG", "FROM", _, "IS", ..] => new MessageModel
             {
@@ -137,7 +140,7 @@ public class TcpTransport : ITransport
             },
             ["REPLY", _, "IS", ..] => new ReplyModel
             {
-                Status = parts[1] == "OK",
+                Status = partsUpper[1] == "OK" || (partsUpper[1] == "NOK" ? false : throw new InvalidMessageReceivedException("Invalid status")),
                 Content = string.Join(" ", parts.Skip(3))
             },
             ["BYE"] => new ByeModel(),
@@ -160,8 +163,7 @@ public class TcpTransport : ITransport
         while (await _stream.ReadAsync(buffer.AsMemory(0, 1), _cancellationToken) != 0)
         {
             var currChar = (int)buffer[0];
-            if (currChar == '\n')
-            // if (prevChar == '\r' && currChar == '\n')
+            if (prevChar == '\r' && currChar == '\n')
             {
                 return sb.ToString().TrimEnd('\r', '\n');
             }

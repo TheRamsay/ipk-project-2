@@ -1,7 +1,9 @@
-﻿using App.Enums;
+﻿using System.Net;
+using App.Enums;
 using App.Exceptions;
 using App.Models;
 using App.Transport;
+using Serilog;
 
 namespace App;
 
@@ -16,9 +18,10 @@ public class Ipk24ChatProtocol : IProtocol
     private readonly SemaphoreSlim _endSignal = new(0, 1);
     // Used for cancelling the message receive loop
     private readonly CancellationTokenSource _cancellationTokenSource;
+    private readonly ILogger _logger;
 
     private readonly IList<Client> _clients;
-    private Client? _client;
+    private Client _client;
 
     private Exception? _exceptionToThrow;
     private ProtocolStateBox? _protocolState;
@@ -27,11 +30,13 @@ public class Ipk24ChatProtocol : IProtocol
     public event EventHandler<IBaseModel>? OnMessage;
     public event EventHandler? OnConnected;
 
-    public Ipk24ChatProtocol(ITransport transport, CancellationTokenSource cancellationTokenSource, IList<Client> clients)
+    public Ipk24ChatProtocol(ITransport transport, CancellationTokenSource cancellationTokenSource, IList<Client> clients, Client client, ILogger logger)
     {
         _transport = transport;
         _cancellationTokenSource = cancellationTokenSource;
         _clients = clients;
+        _client = client;
+        _logger = logger;
         
         // Event subscription
         _transport.OnMessageReceived += OnMessageReceivedHandler;
@@ -54,9 +59,9 @@ public class Ipk24ChatProtocol : IProtocol
             // - Server sends a message that is not expected in the current state
             // The ProtocolEnHandler function is used for throwing exceptions from EventHandlers
             // This is necessary because the exceptions thrown in EventHandlers are not caught by the try-catch block
-            // await await Task.WhenAny(_transport.Start(_protocolState), ProtocolEndHandler());
-            await _transport.Start(_protocolState);
-            Console.WriteLine("FiniSEHEDD!!!!");
+            await await Task.WhenAny(_transport.Start(_protocolState), ProtocolEndHandler());
+            // await _transport.Start(_protocolState);
+            // Console.WriteLine("Finished!!!!");
         }
         // If server sends a malformed message, send ERR, BYE and disconnect
         catch (InvalidMessageReceivedException e)
@@ -64,10 +69,11 @@ public class Ipk24ChatProtocol : IProtocol
             var errorModel = new ErrorModel
             {
                 Content = e.Message,
-                DisplayName = _displayName
+                DisplayName = "Server"
             };
 
-            await SendInternal(_transport.Error(errorModel));
+            await SendInternal(errorModel);
+            await Disconnect();
             // Exception is rethrown for proper ending of the protocol in the ChatClient
             throw;
         }
@@ -99,27 +105,27 @@ public class Ipk24ChatProtocol : IProtocol
 
     private async Task Auth(AuthModel data)
     {
-        await SendInternal(_transport.Auth(data), true);
+        await SendInternal(data, true);
     }
 
     private async Task Join(JoinModel data)
     {
-        await SendInternal(_transport.Join(data), true);
+        await SendInternal(data, true);
     }
 
     private async Task Message(MessageModel data)
     {
-        await SendInternal(_transport.Message(data));
+        await SendInternal(data);
     }
     
     private async Task Reply(ReplyModel data)
     {
-        await SendInternal(_transport.Reply(data));
+        await SendInternal(data);
     }
 
     public async Task Disconnect()
     {
-        await SendInternal(_transport.Bye());
+        await SendInternal(new ByeModel());
         // This will cancel the message receive loop
         await _cancellationTokenSource.CancelAsync();
         _transport.Disconnect();
@@ -147,8 +153,20 @@ public class Ipk24ChatProtocol : IProtocol
         }
     }
 
-    private async Task SendInternal(Task task, bool waitForProcessed = false)
+    private async Task SendInternal(IBaseModel data, bool waitForProcessed = false)
     {
+        var task = data switch
+        {
+            ReplyModel replyModel => _transport.Reply(replyModel),
+            AuthModel authModel => _transport.Auth(authModel),
+            JoinModel joinModel => _transport.Join(joinModel),
+            MessageModel messageModel => _transport.Message(messageModel),
+            ByeModel byeModel => _transport.Bye(),
+            ErrorModel errorModel => _transport.Error(errorModel),
+            _ => throw new InternalException($"Invalid message type {data}")
+        };
+        
+        ServerLogger.LogSent(data, _client.Address);
         // If message needs to be processed, wait for the message to be delivered and processed
         // This is for example needed when sending an AUTH message, because we need to know if the server accepted it
         if (waitForProcessed)
@@ -178,7 +196,7 @@ public class Ipk24ChatProtocol : IProtocol
                 var authenticated = AuthUser(data);
                 if (authenticated)
                 {
-                    Console.WriteLine("AUTH SUCCESFULL");
+                    // Console.WriteLine("AUTH SUCCESFULL");
                     await _transport.StartPrivateConnection();
                     await Reply(new ReplyModel { Status = true, Content = "Welcome to the server"});
                     await AnnounceChannelChange(data.DisplayName, _client?.Channel ?? "general");
@@ -224,6 +242,7 @@ public class Ipk24ChatProtocol : IProtocol
 
         if (_protocolState.State == ProtocolState.End)
         {
+            await AnnounceChannelChange(_client!.DisplayName, _client?.Channel ?? "general", false);
             _endSignal.Release();
         }
     }
@@ -235,9 +254,11 @@ public class Ipk24ChatProtocol : IProtocol
             return false;
         }
 
-        var newClient = new Client { Protocol = this, DisplayName = data.DisplayName, Username = data.Username };
-        _clients.Add(newClient);
-        _client = newClient;
+        // var newClient = new Client { Protocol = this, DisplayName = data.DisplayName, Username = data.Username };
+        // _clients.Add(newClient);
+        // _client = newClient;
+        _client.DisplayName = data.DisplayName;
+        _client.Username = data.Username;
         return true;
     }
     
@@ -296,6 +317,7 @@ public class Ipk24ChatProtocol : IProtocol
     {
         try
         {
+            ServerLogger.LogReceived(model, _client.Address);
             Receive(model);
         }
         catch (Exception e)
@@ -305,11 +327,14 @@ public class Ipk24ChatProtocol : IProtocol
         }
     }
 
-    private void OnConnectedHandler(object? sender, EventArgs args)
+    private void OnConnectedHandler(object? sender, IPEndPoint address)
     {
         try
         {
-            OnConnected?.Invoke(sender, args);
+            // Console.WriteLine("Client connected yupeeee");
+            _client.Address = address;
+            // Console.WriteLine($"Client address is {_client.Address}");
+            // OnConnected?.Invoke(sender, args);
         }
         catch (Exception e)
         {

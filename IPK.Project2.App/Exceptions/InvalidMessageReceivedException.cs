@@ -3,4 +3,4 @@ using App.Models;
 
 namespace App.Exceptions;
 
-public class InvalidMessageReceivedException(string message) : Exception($"Invalid message received (current state: {message})");
+public class InvalidMessageReceivedException(string message) : Exception($"Invalid message received ({message})");

@@ -34,6 +34,10 @@ public interface IBaseUdpModel : IBaseModel
                 var ble = BitConverter.GetBytes((short)propertyValue!).Reverse().ToArray();
                 binaryWriter.Write(ble);
             }
+            else if (propertyType == typeof(bool))
+            {
+                binaryWriter.Write((bool)propertyValue);
+            }
             else
             {
                 throw new NotImplementedException("Property type not implemented");

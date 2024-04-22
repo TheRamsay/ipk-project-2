@@ -12,32 +12,33 @@ namespace App.Transport;
 public class UdpTransport : ITransport
 {
     private readonly CancellationToken _cancellationToken;
-    private readonly UdpClient _client;
+    private UdpClient _client;
     private readonly Options _options;
     // If we have exceeded the retry count, we need to signal the main thread to throw an exception
     private readonly SemaphoreSlim _retryExceededSignal = new(0, 1);
     // We need to keep track of messages that we have already processed, so we don't process them again, only confirm them
     private readonly HashSet<short> _processedMessages = new();
-    private readonly Queue<byte[]> _messages = new();
-
+    private readonly Queue<UdpReceiveResult> _messages = new();
+    
+    private IPEndPoint? _from;
     private PendingMessage? _pendingMessage;
     private short _messageIdSequence;
     private ProtocolStateBox? _protocolState;
     private IPAddress _ipAddress;
 
     public event EventHandler<IBaseModel>? OnMessageReceived;
-    public event EventHandler? OnConnected;
+    public event EventHandler<IPEndPoint>? OnConnected;
     public event EventHandler<IModelWithId> OnTimeoutExpired;
     public event EventHandler? OnMessageDelivered;
 
     private event EventHandler<UdpConfirmModel>? OnMessageConfirmed;
 
-    public UdpTransport(Options options, CancellationToken cancellationToken, UdpClient client, IEnumerable<byte[]> messages)
+    public UdpTransport(Options options, CancellationToken cancellationToken, UdpClient client, IEnumerable<UdpReceiveResult> messages)
     {
         _cancellationToken = cancellationToken;
         _options = options;
         _client = client;
-        _messages = new Queue<byte[]>(messages);
+        _messages = new Queue<UdpReceiveResult>(messages);
 
         // Event subscription
         OnMessageConfirmed += OnMessageConfirmedHandler;
@@ -51,7 +52,8 @@ public class UdpTransport : ITransport
     
     public async Task StartPrivateConnection()
     {
-        _client.Client.Bind(new IPEndPoint(IPAddress.Any, 4568));
+        _client = new UdpClient(0);
+        // _client.Client.Bind(new IPEndPoint(IPAddress.Any, 4568));
     }
 
     public async Task Auth(AuthModel data)
@@ -92,18 +94,17 @@ public class UdpTransport : ITransport
     public async Task Start(ProtocolStateBox protocolState)
     {
         _protocolState = protocolState;
-        OnConnected?.Invoke(this, EventArgs.Empty);
 
-        Console.WriteLine("STarting");
+        // Console.WriteLine("STarting");
         // Wait until receiving loop is finished or retry count is exceeded
         await await Task.WhenAny(Receive(), RetryExceededHandler());
     }
 
     private async Task Receive()
     {
-        var ipv4 = await GetIpAddress(_options.IpAddress);
+        // var ipv4 = await GetIpAddress(_options.IpAddress);
         //
-        _ipAddress = ipv4 ?? throw new ServerUnreachableException("Invalid server address");
+        // _ipAddress = ipv4 ?? throw new ServerUnreachableException("Invalid server address");
 
         // UDP client is listening on all ports
         // _client.Client.Bind(new IPEndPoint(_ipAddress, 0));
@@ -113,6 +114,14 @@ public class UdpTransport : ITransport
         {
             var response = await GetNextMessage();
             var from = response.RemoteEndPoint;
+            
+            // We are connected after first message is received
+            if (_from is null)
+            {
+                OnConnected?.Invoke(this, from);
+            }
+            
+            _from = from;
             var dataBuffer = response.Buffer;
             var parsedData = ParseMessage(dataBuffer);
             
@@ -128,9 +137,8 @@ public class UdpTransport : ITransport
             }
             catch (ValidationException e)
             {
-                throw new InvalidMessageReceivedException($"Unable to validate received message: {e.Message}");
+                throw new InvalidMessageReceivedException(e.Message);
             }
-
 
             switch (parsedData)
             {
@@ -145,14 +153,9 @@ public class UdpTransport : ITransport
                         var model = parsedData.ToBaseModel();
 
                         // After authentication, we need to reconnect to a different port, for private communication
-                        if (model is ReplyModel && _protocolState.State is ProtocolState.Auth)
-                        {
-                            _options.Port = (ushort)from.Port;
-                        }
-
-                        Console.WriteLine("Sending confirmation");
+                        // Console.WriteLine("Sending confirmation");
                         await Send(new UdpConfirmModel { RefMessageId = modelWithId.Id });
-                        Console.WriteLine("Confirmation sent");
+                        // Console.WriteLine("Confirmation sent");
                         _processedMessages.Add(modelWithId.Id);
                         OnMessageReceived?.Invoke(this, model);
                         break;
@@ -164,8 +167,8 @@ public class UdpTransport : ITransport
     private async Task Send(IBaseUdpModel data)
     {
         var buffer = IBaseUdpModel.Serialize(data);
-        var sendTo = new IPEndPoint(_ipAddress, _options.Port);
-        await _client.SendAsync(buffer, sendTo, _cancellationToken);
+        // var sendTo = new IPEndPoint(_ipAddress, _options.Port);
+        await _client.SendAsync(buffer, _from, _cancellationToken);
 
         // If the message is a model with ID, we need to handle proper confirmation from the server
         if (data is IModelWithId modelWithId)
@@ -232,12 +235,11 @@ public class UdpTransport : ITransport
     {
         if (_messages.Count != 0)
         {
-            Console.WriteLine("Getting message from the queue");
-            return new UdpReceiveResult(_messages.Dequeue(), new IPEndPoint(IPAddress.Any, 0));
+            // Console.WriteLine("Getting message from the queue");
+            // return new UdpReceiveResult(_messages.Dequeue(), new IPEndPoint(IPAddress.Any, 0));
+            return _messages.Dequeue();
         }
 
-        Console.WriteLine("Waiting for message");
         return await _client.ReceiveAsync(_cancellationToken);
     }
-
 }

@@ -3,7 +3,7 @@ using App.Models;
 
 namespace App.Exceptions;
 
-public class ServerException(ErrorModel data) : Exception
+public class ClientException(ErrorModel data) : Exception
 {
     public ErrorModel ErrorData { get; private set; } = data;
 }

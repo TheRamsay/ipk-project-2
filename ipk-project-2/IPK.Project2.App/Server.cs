@@ -114,6 +114,11 @@ public class Server(Options opt)
     
     public static async Task<IPAddress?> GetIpAddress(string hostname)
     {
+        if (hostname == "0.0.0.0")
+        {
+            return IPAddress.Any;
+        }
+        
         return (await Dns.GetHostAddressesAsync(hostname))
             .FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
     }

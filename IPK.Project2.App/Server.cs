@@ -1,21 +1,15 @@
 ﻿using System.Net;
 using System.Net.Sockets;
+using App.Models.udp;
 using App.Transport;
 using Serilog;
 
 namespace App;
 
-public class Server
+public class Server(Options opt, ILogger logger)
 {
-    private readonly Options _opt;
     private readonly List<Client> _clients = new();
-    private readonly ILogger _logger;
-
-    public Server(Options opt, ILogger logger)
-    {
-        _opt = opt;
-        _logger = logger;
-    }
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
 
     public async Task Run(Options options)
     {
@@ -24,28 +18,29 @@ public class Server
 
     private async Task RunTcp()
     { 
-        var server = new TcpListener(IPAddress.Parse(_opt.IpAddress), _opt.Port);
-        var cancellationTokenSource = new CancellationTokenSource();
+        var server = new TcpListener(IPAddress.Parse(opt.IpAddress), opt.Port);
         
         server.Start();
         
-        while (!cancellationTokenSource.Token.IsCancellationRequested)
+        while (!_cancellationTokenSource.Token.IsCancellationRequested)
         {
-            var socket = await server.AcceptTcpClientAsync(cancellationTokenSource.Token);
+            var socket = await server.AcceptTcpClientAsync(_cancellationTokenSource.Token);
 
             var client = new Client();
             _clients.Add(client);
             
-            var protocol = new Ipk24ChatProtocol(new TcpTransport(_opt, CancellationToken.None, socket),
-                cancellationTokenSource, _clients, client, _logger);
+            var protocol = new Ipk24ChatProtocol(new TcpTransport(opt, CancellationToken.None, socket),
+                _cancellationTokenSource, _clients, client, logger, opt);
             
             client.Protocol = protocol;
 
-
+            ServerLogger.LogDebug("Creating new client protocol");
+            
             protocol.Start().ContinueWith(_ =>
             {
                 ServerLogger.LogDebug("Removing client from client list");
-                return _clients.RemoveAll(c => c == client);
+                _clients.RemoveAll(c => c == client);
+                ServerLogger.LogDebug($"Number of clients: {_clients.Count}");
             });
         }
         
@@ -54,34 +49,51 @@ public class Server
     
     private async Task RunUdp()
     {
-        var server = new UdpClient(4567);
+        var endpoint = new IPEndPoint(IPAddress.Parse(opt.IpAddress), opt.Port);
+        var server = new UdpClient(endpoint);
         var cancellationTokenSource = new CancellationTokenSource();
         
         while (!cancellationTokenSource.Token.IsCancellationRequested)
         {
             var data = await server.ReceiveAsync();
 
-            var client = new Client();
+            var client = _clients.FirstOrDefault(x =>
+                Equals(x.Address!.Address, data.RemoteEndPoint.Address) && x.Address.Port == data.RemoteEndPoint.Port);
+
+            if (client is not null)
+            {
+                ServerLogger.LogDebug("Redirecting data to existing client");
+                await ((UdpTransport)client.Protocol.Transport).Redirect(data);
+                continue;
+            }
+
+            client = new Client();
             _clients.Add(client);
             
             var protocol = new Ipk24ChatProtocol(
                 new UdpTransport(
-                    _opt, 
+                    opt, 
                     CancellationToken.None, 
                     server,
                     new List<UdpReceiveResult> { data }), 
                 cancellationTokenSource, 
                 _clients,
                 client,
-                _logger
+                logger,
+                opt
             );
             
             client.Protocol = protocol;
+            ServerLogger.LogDebug("Creating new client protocol");
             
-            protocol.Start().ContinueWith(_ => _clients.RemoveAll(x => x.Protocol == protocol));
+            protocol.Start().ContinueWith(_ =>
+            {
+                ServerLogger.LogDebug("Removing client from client list");
+                _clients.RemoveAll(c => c == client);
+                ServerLogger.LogDebug($"Number of clients: {_clients.Count}");
+            });
         }
         
         server.Close();
     }
 }
-

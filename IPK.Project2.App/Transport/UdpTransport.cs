@@ -52,7 +52,8 @@ public class UdpTransport : ITransport
     
     public async Task StartPrivateConnection()
     {
-        _client = new UdpClient(0);
+        var endpoint = new IPEndPoint(IPAddress.Parse(_options.IpAddress), 0);
+        _client = new UdpClient(endpoint);
         // _client.Client.Bind(new IPEndPoint(IPAddress.Any, 4568));
     }
 
@@ -88,7 +89,8 @@ public class UdpTransport : ITransport
     private async Task RetryExceededHandler()
     {
         await _retryExceededSignal.WaitAsync(_cancellationToken);
-        throw new ServerUnreachableException("Max retries reached, message not delivered");
+        ServerLogger.LogDebug("Max retries reached, message not delivered");
+        throw new ClientUnreachableException("Max retries reached, message not delivered");
     }
 
     public async Task Start(ProtocolStateBox protocolState)
@@ -113,54 +115,60 @@ public class UdpTransport : ITransport
         while (!_cancellationToken.IsCancellationRequested)
         {
             var response = await GetNextMessage();
-            var from = response.RemoteEndPoint;
-            
-            // We are connected after first message is received
-            if (_from is null)
-            {
-                OnConnected?.Invoke(this, from);
-            }
-            
-            _from = from;
-            var dataBuffer = response.Buffer;
-            var parsedData = ParseMessage(dataBuffer);
-            
-            if (parsedData is UdpConfirmModel confirmModel)
-            {
-                OnMessageConfirmed?.Invoke(this, confirmModel);
-                continue;
-            }
+            await HandleReceive(response);
+        }
+    }
 
-            try
-            {
-                ModelValidator.Validate(parsedData.ToBaseModel());
-            }
-            catch (ValidationException e)
-            {
-                throw new InvalidMessageReceivedException(e.Message);
-            }
+    private async Task HandleReceive(UdpReceiveResult response)
+    {
+        var from = response.RemoteEndPoint;
+        
+        // We are connected after first message is received
+        if (_from is null)
+        {
+            OnConnected?.Invoke(this, from);
+        }
+        
+        _from = from;
+        var dataBuffer = response.Buffer;
+        var parsedData = ParseMessage(dataBuffer);
+        
+        if (parsedData is UdpConfirmModel confirmModel)
+        {
+            OnMessageConfirmed?.Invoke(this, confirmModel);
+            return;
+        }
 
-            switch (parsedData)
-            {
-                // If we have already processed this message, just confirm it and continue
-                case IModelWithId modelWithId when _processedMessages.Contains(modelWithId.Id):
+        try
+        {
+            ModelValidator.Validate(parsedData.ToBaseModel());
+        }
+        catch (ValidationException e)
+        {
+            throw new InvalidMessageReceivedException(e.Message);
+        }
+
+        switch (parsedData)
+        {
+            // If we have already processed this message, just confirm it and continue
+            case IModelWithId modelWithId when _processedMessages.Contains(modelWithId.Id):
+                ServerLogger.LogSent("CONFIRM", _from);
+                await Send(new UdpConfirmModel { RefMessageId = modelWithId.Id });
+                return;
+            // If we haven't processed this message yet, confirm it and process it
+            case IModelWithId modelWithId:
+                {
+                    
+                    var model = parsedData.ToBaseModel();
+
+                    // After authentication, we need to reconnect to a different port, for private communication
+                    // Console.WriteLine("Sending confirmation");
                     await Send(new UdpConfirmModel { RefMessageId = modelWithId.Id });
-                    continue;
-                // If we haven't processed this message yet, confirm it and process it
-                case IModelWithId modelWithId:
-                    {
-                        
-                        var model = parsedData.ToBaseModel();
-
-                        // After authentication, we need to reconnect to a different port, for private communication
-                        // Console.WriteLine("Sending confirmation");
-                        await Send(new UdpConfirmModel { RefMessageId = modelWithId.Id });
-                        // Console.WriteLine("Confirmation sent");
-                        _processedMessages.Add(modelWithId.Id);
-                        OnMessageReceived?.Invoke(this, model);
-                        break;
-                    }
-            }
+                    // Console.WriteLine("Confirmation sent");
+                    _processedMessages.Add(modelWithId.Id);
+                    OnMessageReceived?.Invoke(this, model);
+                    break;
+                }
         }
     }
 
@@ -188,6 +196,11 @@ public class UdpTransport : ITransport
         }
     }
 
+    public async Task Redirect(UdpReceiveResult result)
+    {
+        await HandleReceive(result);
+    }
+
     private IBaseUdpModel ParseMessage(byte[] data)
     {
         return IBaseUdpModel.Deserialize(data);
@@ -196,11 +209,13 @@ public class UdpTransport : ITransport
     private void OnMessageConfirmedHandler(object? sender, UdpConfirmModel data)
     {
         // If confirmation is for a message we haven't sent, ignore it
+        ServerLogger.LogReceived("CONFIRM", _from);
         if (_pendingMessage?.Model.Id != data.RefMessageId)
         {
             return;
         }
 
+        ServerLogger.LogDebug($"Message with ID {data.RefMessageId} confirmed successfully");
         OnMessageDelivered?.Invoke(this, EventArgs.Empty);
         _pendingMessage = null;
     }
@@ -215,6 +230,7 @@ public class UdpTransport : ITransport
         // If we haven't exceeded the retry count, retry the message
         if (_pendingMessage?.Retries < _options.RetryCount)
         {
+            ServerLogger.LogDebug($"Resending message with ID {data.Id}");
             _pendingMessage.Retries++;
             await Send((IBaseUdpModel)data);
         }

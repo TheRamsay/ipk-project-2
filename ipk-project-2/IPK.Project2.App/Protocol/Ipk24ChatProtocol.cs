@@ -155,7 +155,7 @@ public class Ipk24ChatProtocol: IProtocol
             _ => throw new InternalException($"Invalid message type {data}")
         };
         
-        ServerLogger.LogSent(data, _client.Address);
+        ServerLogger.LogSent(data, _client.Address ?? new IPEndPoint(IPAddress.Any, 0));
         // If message needs to be processed, wait for the message to be delivered and processed
         // This is for example needed when sending an AUTH message, because we need to know if the server accepted it
         if (waitForProcessed)

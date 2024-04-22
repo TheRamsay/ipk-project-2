@@ -9,7 +9,7 @@ public static class ServerLogger
 {
     public static void LogInternalError(string msg)
     {
-        Console.Error.WriteLine($"ERR: {msg}");
+        // Console.Error.WriteLine($"ERR: {msg}");
     }
 
     private static string BuildModelOutput(IBaseModel model)
@@ -58,6 +58,6 @@ public static class ServerLogger
 
     public static void LogDebug(string msg)
     {
-        Console.Error.WriteLine($"[DEBUG] {msg}");
+        // Console.Error.WriteLine($"[DEBUG] {msg}");
     }
 }

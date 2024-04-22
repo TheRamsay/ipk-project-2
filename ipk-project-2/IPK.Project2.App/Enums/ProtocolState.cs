@@ -4,9 +4,7 @@ public enum ProtocolState
 {
     Accept,
     Auth,
-    WaitForAuth,
     Open,
-    Error,
     End
 }
 

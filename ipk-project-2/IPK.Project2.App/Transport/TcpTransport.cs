@@ -9,11 +9,10 @@ using App.Transport;
 
 namespace App.Transport;
 
-public class TcpTransport : ITransport
+public class TcpTransport(Options options, CancellationToken cancellationToken, TcpClient client)
+    : ITransport
 {
-    private readonly CancellationToken _cancellationToken;
-    private readonly TcpClient _client;
-    private readonly Options _options;
+    private readonly Options _options = options;
 
     private NetworkStream? _stream;
 
@@ -21,17 +20,10 @@ public class TcpTransport : ITransport
     public event EventHandler? OnMessageDelivered;
     public event EventHandler<IPEndPoint>? OnConnected;
 
-    public TcpTransport(Options options, CancellationToken cancellationToken, TcpClient client)
-    {
-        _cancellationToken = cancellationToken;
-        _options = options;
-        _client = client;
-    }
-
     public async Task Start(ProtocolStateBox protocolState)
     {
-        _stream = _client.GetStream();
-        var from = _client.Client.RemoteEndPoint as IPEndPoint;
+        _stream = client.GetStream();
+        var from = client.Client.RemoteEndPoint as IPEndPoint;
         if (from is null)
         {
             throw new ClientUnreachableException("Could not get remote endpoint");
@@ -70,7 +62,7 @@ public class TcpTransport : ITransport
 
     public void Disconnect()
     {
-        _client.Close();
+        client.Close();
     }
 
     public async Task Auth(AuthModel data)
@@ -110,7 +102,7 @@ public class TcpTransport : ITransport
         var bytes = Encoding.ASCII.GetBytes(message);
         if (_stream != null)
         {
-            await _stream.WriteAsync(bytes, _cancellationToken);
+            await _stream.WriteAsync(bytes, cancellationToken);
             OnMessageDelivered?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -162,7 +154,7 @@ public class TcpTransport : ITransport
         var sb = new StringBuilder();
 
         // Read byte by byte until we find \r\n
-        while (await _stream.ReadAsync(buffer.AsMemory(0, 1), _cancellationToken) != 0)
+        while (await _stream.ReadAsync(buffer.AsMemory(0, 1), cancellationToken) != 0)
         {
             var currChar = (int)buffer[0];
             if (prevChar == '\r' && currChar == '\n')

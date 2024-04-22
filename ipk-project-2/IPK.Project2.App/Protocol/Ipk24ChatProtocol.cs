@@ -19,7 +19,6 @@ public class Ipk24ChatProtocol: IProtocol
     private readonly SemaphoreSlim _endSignal = new(0, 1);
     // Used for cancelling the message receive loop
     private readonly CancellationTokenSource _cancellationTokenSource;
-    private readonly ILogger _logger;
     private readonly Options _options;
 
     private readonly IList<Client> _clients;
@@ -31,13 +30,12 @@ public class Ipk24ChatProtocol: IProtocol
     public event EventHandler<IBaseModel>? OnMessage;
     public event EventHandler? OnConnected;
 
-    public Ipk24ChatProtocol(ITransport transport, CancellationTokenSource cancellationTokenSource,  IList<Client> clients, Client client, ILogger logger, Options options)
+    public Ipk24ChatProtocol(ITransport transport, CancellationTokenSource cancellationTokenSource,  IList<Client> clients, Client client, Options options)
     {
         Transport = transport;
         _cancellationTokenSource = cancellationTokenSource;
         _clients = clients;
         _client = client;
-        _logger = logger;
         _options = options;
         
         // Event subscription
@@ -98,35 +96,6 @@ public class Ipk24ChatProtocol: IProtocol
             ServerLogger.LogDebug(e.Message);
             await Disconnect();
         }
-    }
-
-    public async Task Send(IBaseModel model)
-    {
-        switch (model)
-        {
-            case ReplyModel data:
-                await Reply(data);
-                break;
-            case AuthModel data:
-                await Auth(data);
-                break;
-            case JoinModel data:
-                await Join(data);
-                break;
-            case MessageModel data:
-                await Message(data);
-                break;
-        }
-    }
-
-    private async Task Auth(AuthModel data)
-    {
-        await SendInternal(data, true);
-    }
-
-    private async Task Join(JoinModel data)
-    {
-        await SendInternal(data, true);
     }
 
     private async Task Message(MessageModel data)

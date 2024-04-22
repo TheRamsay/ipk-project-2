@@ -52,9 +52,15 @@ public class UdpTransport : ITransport
     
     public async Task StartPrivateConnection()
     {
-        var endpoint = new IPEndPoint(IPAddress.Parse(_options.IpAddress), 0);
+        var ipAddress = await Server.GetIpAddress(_options.IpAddress);
+        
+        if (ipAddress is null)
+        {
+            throw new ClientUnreachableException("Invalid server address");
+        }
+        
+        var endpoint = new IPEndPoint(ipAddress, 0);
         _client = new UdpClient(endpoint);
-        // _client.Client.Bind(new IPEndPoint(IPAddress.Any, 4568));
     }
 
     public async Task Auth(AuthModel data)
@@ -175,7 +181,6 @@ public class UdpTransport : ITransport
     private async Task Send(IBaseUdpModel data)
     {
         var buffer = IBaseUdpModel.Serialize(data);
-        // var sendTo = new IPEndPoint(_ipAddress, _options.Port);
         await _client.SendAsync(buffer, _from, _cancellationToken);
 
         // If the message is a model with ID, we need to handle proper confirmation from the server
@@ -251,8 +256,6 @@ public class UdpTransport : ITransport
     {
         if (_messages.Count != 0)
         {
-            // Console.WriteLine("Getting message from the queue");
-            // return new UdpReceiveResult(_messages.Dequeue(), new IPEndPoint(IPAddress.Any, 0));
             return _messages.Dequeue();
         }
 

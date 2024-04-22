@@ -4,12 +4,6 @@ using App.Models;
 
 namespace App.Transport;
 
-public class MessageEvent
-{
-    public required IBaseModel Model { get; set; }
-    public required IPEndPoint From { get; set; }
-}
-
 public interface ITransport
 {
     public event EventHandler<IBaseModel> OnMessageReceived;

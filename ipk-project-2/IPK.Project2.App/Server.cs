@@ -1,12 +1,13 @@
 ﻿using System.Net;
 using System.Net.Sockets;
+using App.Exceptions;
 using App.Models.udp;
 using App.Transport;
 using Serilog;
 
 namespace App;
 
-public class Server(Options opt, ILogger logger)
+public class Server(Options opt)
 {
     private readonly List<Client> _clients = new();
     private readonly CancellationTokenSource _cancellationTokenSource = new();
@@ -18,7 +19,14 @@ public class Server(Options opt, ILogger logger)
 
     private async Task RunTcp()
     { 
-        var server = new TcpListener(IPAddress.Parse(opt.IpAddress), opt.Port);
+        var ipAddress = await GetIpAddress(opt.IpAddress);
+        
+        if (ipAddress is null)
+        {
+            throw new ClientUnreachableException("Could not resolve IP address");
+        }
+        
+        var server = new TcpListener(ipAddress, opt.Port);
         
         server.Start();
         
@@ -30,7 +38,7 @@ public class Server(Options opt, ILogger logger)
             _clients.Add(client);
             
             var protocol = new Ipk24ChatProtocol(new TcpTransport(opt, CancellationToken.None, socket),
-                _cancellationTokenSource, _clients, client, logger, opt);
+                _cancellationTokenSource, _clients, client, opt);
             
             client.Protocol = protocol;
 
@@ -49,7 +57,14 @@ public class Server(Options opt, ILogger logger)
     
     private async Task RunUdp()
     {
-        var endpoint = new IPEndPoint(IPAddress.Parse(opt.IpAddress), opt.Port);
+        var ipAddress = await GetIpAddress(opt.IpAddress);
+        
+        if (ipAddress is null)
+        {
+            throw new ClientUnreachableException("Could not resolve IP address");
+        }
+        
+        var endpoint = new IPEndPoint(ipAddress, opt.Port);
         var server = new UdpClient(endpoint);
         var cancellationTokenSource = new CancellationTokenSource();
         
@@ -79,7 +94,6 @@ public class Server(Options opt, ILogger logger)
                 cancellationTokenSource, 
                 _clients,
                 client,
-                logger,
                 opt
             );
             
@@ -95,5 +109,11 @@ public class Server(Options opt, ILogger logger)
         }
         
         server.Close();
+    }
+    
+    public static async Task<IPAddress?> GetIpAddress(string hostname)
+    {
+        return (await Dns.GetHostAddressesAsync(hostname))
+            .FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
     }
 }

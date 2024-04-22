@@ -1,6 +1,8 @@
 bin/
-.idea/
+.idea
 obj/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/
+ipk24chat-server
+IPK.Project2.App.pdb

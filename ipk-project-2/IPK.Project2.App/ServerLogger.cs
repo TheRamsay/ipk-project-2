@@ -16,12 +16,12 @@ public static class ServerLogger
     {
         var messageType = model switch
         {
-            ErrorModel errorModel => "ERR",
-            MessageModel messageModel => "MSG",
-            ReplyModel replyModel => "REPLY",
-            JoinModel joinModel => "JOIN",
-            AuthModel authModel => "AUTH",
-            ByeModel byeModel => "BYE",
+            ErrorModel => "ERR",
+            MessageModel => "MSG",
+            ReplyModel => "REPLY",
+            JoinModel => "JOIN",
+            AuthModel => "AUTH",
+            ByeModel => "BYE",
             _ => "UNKNOWN"
         };
 

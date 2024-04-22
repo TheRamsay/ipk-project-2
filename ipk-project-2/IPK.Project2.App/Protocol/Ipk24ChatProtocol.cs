@@ -4,7 +4,6 @@ using App.Enums;
 using App.Exceptions;
 using App.Models;
 using App.Transport;
-using Serilog;
 
 namespace App;
 
@@ -26,9 +25,6 @@ public class Ipk24ChatProtocol: IProtocol
 
     private Exception? _exceptionToThrow;
     private ProtocolStateBox? _protocolState;
-
-    public event EventHandler<IBaseModel>? OnMessage;
-    public event EventHandler? OnConnected;
 
     public Ipk24ChatProtocol(ITransport transport, CancellationTokenSource cancellationTokenSource,  IList<Client> clients, Client client, Options options)
     {
@@ -79,8 +75,6 @@ public class Ipk24ChatProtocol: IProtocol
             ServerLogger.LogDebug("Disconnecting");
             await Disconnect();
             ServerLogger.LogDebug("Disconnected");
-            // Exception is rethrown for proper ending of the protocol in the ChatClient
-            // throw;
         }
         catch (Exception e) when (e is ClientUnreachableException or SocketException)
         {
@@ -230,7 +224,7 @@ public class Ipk24ChatProtocol: IProtocol
 
         if (_protocolState.State == ProtocolState.End)
         {
-            await AnnounceChannelChange(_client!.DisplayName, _client.Channel, false);
+            await AnnounceChannelChange(_client.DisplayName, _client.Channel, false);
             _endSignal.Release();
         }
     }
@@ -292,7 +286,7 @@ public class Ipk24ChatProtocol: IProtocol
     {
         try
         {
-            ServerLogger.LogReceived(model, _client.Address);
+            ServerLogger.LogReceived(model, _client.Address ?? new IPEndPoint(IPAddress.Any, 0));
             Receive(model);
         }
         catch (Exception e)
@@ -306,10 +300,7 @@ public class Ipk24ChatProtocol: IProtocol
     {
         try
         {
-            // Console.WriteLine("Client connected yupeeee");
             _client.Address = address;
-            // Console.WriteLine($"Client address is {_client.Address}");
-            // OnConnected?.Invoke(sender, args);
         }
         catch (Exception e)
         {

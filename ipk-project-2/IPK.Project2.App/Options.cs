@@ -6,7 +6,7 @@ namespace App;
 
 public class Options
 {
-    [Option('l', Required = true, HelpText = "Server IP or hostname")]
+    [Option('l', Required = false, Default = (string)"0.0.0.0", HelpText = "Server IP or hostname")]
     public string IpAddress { get; set; }
 
     [Option('p', Required = false, Default = (ushort)4567, HelpText = "Server port")]

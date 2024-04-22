@@ -8,7 +8,7 @@ using App.Transport;
 
 public class Client
 {
-    public Ipk24ChatProtocol Protocol { get; set; }
+    public Ipk24ChatProtocol? Protocol { get; set; }
     public string Username { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Channel { get; set; } = "general";

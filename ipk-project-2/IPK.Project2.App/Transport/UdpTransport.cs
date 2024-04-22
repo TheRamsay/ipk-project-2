@@ -1,7 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using App.Enums;
 using App.Exceptions;
 using App.Models;
@@ -18,13 +17,12 @@ public class UdpTransport : ITransport
     private readonly SemaphoreSlim _retryExceededSignal = new(0, 1);
     // We need to keep track of messages that we have already processed, so we don't process them again, only confirm them
     private readonly HashSet<short> _processedMessages = new();
-    private readonly Queue<UdpReceiveResult> _messages = new();
+    private readonly Queue<UdpReceiveResult> _messages;
     
     private IPEndPoint? _from;
     private PendingMessage? _pendingMessage;
     private short _messageIdSequence;
     private ProtocolStateBox? _protocolState;
-    private IPAddress _ipAddress;
 
     public event EventHandler<IBaseModel>? OnMessageReceived;
     public event EventHandler<IPEndPoint>? OnConnected;
@@ -214,7 +212,7 @@ public class UdpTransport : ITransport
     private void OnMessageConfirmedHandler(object? sender, UdpConfirmModel data)
     {
         // If confirmation is for a message we haven't sent, ignore it
-        ServerLogger.LogReceived("CONFIRM", _from);
+        ServerLogger.LogReceived("CONFIRM", _from ?? new IPEndPoint(IPAddress.Any, 0));
         if (_pendingMessage?.Model.Id != data.RefMessageId)
         {
             return;
@@ -244,12 +242,6 @@ public class UdpTransport : ITransport
             // Big problem ⚠️(server is eepy I guess 😴, we throw an exception to the main thread to handle it)
             _retryExceededSignal.Release();
         }
-    }
-
-    private async Task<IPAddress?> GetIpAddress(string hostname)
-    {
-        return (await Dns.GetHostAddressesAsync(hostname, _cancellationToken))
-            .FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
     }
 
     private async Task<UdpReceiveResult> GetNextMessage()

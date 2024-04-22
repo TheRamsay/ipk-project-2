@@ -9,6 +9,7 @@ namespace App;
 
 public class Server(Options opt)
 {
+    // List of connected clients
     private readonly List<Client> _clients = new();
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 

@@ -44,7 +44,7 @@ public class Server
 
             protocol.Start().ContinueWith(_ =>
             {
-                Console.WriteLine("Removing client from client list");
+                ServerLogger.LogDebug("Removing client from client list");
                 return _clients.RemoveAll(c => c == client);
             });
         }
